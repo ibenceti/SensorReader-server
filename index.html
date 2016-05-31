@@ -1,6 +1,6 @@
 <html>
 	<head>
-		<title>Sample "Hello, World" Application</title>
+		<title>SensorReader</title>
 		
 		<script src="/socket.io/socket.io.js"></script>
 		<script type="text/javascript" src="/js/jquery-1.12.3.min.js"></script>
@@ -24,8 +24,8 @@
 			$(function() {
 				var tabTitle = $( "#tab_title" ),
 				tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>",
-				// tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Start sending</button><button type='button'onclick='button2(deviceSocketId)'>Stop sending </button><button type='button' >Click Me!</button><div id='flot-placeholder1-#{href}' style='width:800px;height:200px;margin:0 auto'></div><div id='flot-placeholder2#{href}' style='width:800px;height:200px;margin:0 auto'></div><div id='flot-placeholder3-#{href}' style='width:800px;height:200px;margin:0 auto'></div>",
-				tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Start sending</button><button type='button' onclick='button2(deviceSocketId)'>Stop sending </button><button type='button' >Click Me!</button>",
+				
+				tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId)' >Save period to DB</button>",
 				tabCounter = 2;
 				
 				var tabs = $( "#tabs" ).tabs();
@@ -163,9 +163,18 @@
 			<form>
 				<fieldset class="ui-helper-reset">
 					<label for="tab_title">Title</label>
-					<input type="text" name="tab_title" id="tab_title" value="Tab Title" class="ui-widget-content ui-corner-all">
+					<input type="text" name="tab_title" required id="tab_title" value="Tab Title" class="ui-widget-content ui-corner-all">
 					<label for="devicesSelector">Select device</label>
 					<select name="devicesSelector" id="devicesSelector"></select>
+				</fieldset>
+			</form>	
+		</div>
+
+		<div id="downloadDialog" title="Download">
+			<form>
+				<fieldset class="ui-helper-reset">
+					<label for="tab_title">Download data</label>
+					<input type="text" name="tab_title" id="tab_title" value="Tab Title" class="ui-widget-content ui-corner-all">
 				</fieldset>
 			</form>	
 		</div>
@@ -176,14 +185,6 @@
 			<ul>
 			</ul>
 		</div>
-		
-		
-		
-		<button type="button" onclick="button1(deviceSocketId)">Start sending</button>
-		
-		<button type="button" onclick="button2(deviceSocketId)">Stop sending </button>
-		
-		<button type="button" >Click Me!</button>
 		
 		<div id="flot-placeholder1" style="width:800px;height:200px;margin:0 auto"></div>
 		
@@ -261,13 +262,38 @@
 					tickColor: "#008040"
 				}
 			};
+
+			var downloadDialog = $( "#downloadDialog" ).dialog({
+					autoOpen: false,
+					modal: true,
+					position: { at: "center", of: "#flot-placeholder1"},
+					buttons: {
+						Download: function() {
+							$( this ).dialog( "close" );
+						},
+						Cancel: function() {
+							$( this ).dialog( "close" );
+						}
+					},
+					close: function() {
+						form[ 0 ].reset();
+					}
+				});
 			
 			function button1(deviceSocketId) { 
-				socket.emit("start_sending", deviceSocketId);
+				socket.emit("db_dump", deviceSocketId, function (){
+					//notify dumped
+				});
 			}
 			
 			function button2(deviceSocketId) { 
-				socket.emit("stop_sending", deviceSocketId);
+				socket.emit("dump_txt", deviceSocketId, function ( dataDump ){
+				
+				});
+			}
+
+			function button3(deviceSocketId, interval) { 
+				socket.emit("db_save_interval", deviceSocketId, interval);
 			}
 			
 			
@@ -288,15 +314,13 @@
 					console.log("BUFFER ARRAY", socketId);
 					deviceSocketId = socketId;
 					var parsed = JSON.parse(msg);
-					//console.log("MSG", msg);
+
 					if (params == null){
 						params = parsed;
 						device = params.device_id;
 						updateInterval = params.resolution;
 					}
-					//Array.prototype.push.apply(data ,parsed.data[0])
 
-					
 					for (var j = 0; j < parsed.data[0].length; j++) {
 						var tempTime = now += updateInterval;
 						for (var i = 0; i < parsed.data.length; i++){	
@@ -304,23 +328,7 @@
 							tabData[activeTab]['dataBuff' + (i+1)].push(temp);
 						}
 					}
-					
-					
-					/*for (index = 0; index < parsed.data[0].length; ++index) {
-						
-						var tempTime = now += updateInterval;
-						var temp1 = [tempTime, parsed.data[0][index]];
-						var temp2 = [tempTime, parsed.data[1][index]];
-						var temp3 = [tempTime, parsed.data[2][index]];
-						
-						tabData[activeTab]['dataBuff1'].push(temp1);
-						tabData[activeTab]['dataBuff2'].push(temp2);
-						tabData[activeTab]['dataBuff3'].push(temp3);
-						
-					}*/
 				}
-				//updateCharts (activeTab);
-				
 			});
 
 			socket.on("reconnect", function (oldSocketId, newSocketId) {
@@ -348,35 +356,10 @@
 								.push(tabData[activeTab]['dataBuff' + j].shift());
 							tabData[activeTab]['data' + j].shift();
 						}
-
-						//tabData[activeTab]['data1'].push(tabData[activeTab]['dataBuff1'].shift());
-						//tabData[activeTab]['data2'].push(tabData[activeTab]['dataBuff2'].shift());
-						//tabData[activeTab]['data3'].push(tabData[activeTab]['dataBuff3'].shift());
 					}
 					
 					console.log("BUFFER LEN", tabData[activeTab]['dataBuff1'].length);
-					
-					/*while(tabData[activeTab]['data1'].length > totalPoints){
-
-						for (var j = 1; j <= numberOfCharts; j++) {
-							tabData[activeTab]['data' + j].shift();
-						}
-						//tabData[activeTab]['data1'].shift();
-						//tabData[activeTab]['data2'].shift();
-						//tabData[activeTab]['data3'].shift();
-					}*/
-					
 					console.log("ARRAY", tabData[activeTab]['data1'].length);
-					
-					/*dataset1 = [
-					{ data: tabData[activeTab]['data1'], color: "#00FF00" }
-					];
-					dataset2 = [
-					{ data: tabData[activeTab]['data2'], color: "#00FF00" }
-					];
-					dataset3 = [
-					{ data: tabData[activeTab]['data3'], color: "#00FF00" }
-					];*/
 
 					for (var j = 1; j <= numberOfCharts; j++) {
 						var plot = $.plot($("#flot-placeholder"+ j +"-" + activeTab)
@@ -384,21 +367,13 @@
 							, options);
 						plot.draw();
 					}
-					
-					//$.plot($("#flot-placeholder1-" + activeTab), dataset1, options)
-					//$.plot($("#flot-placeholder2-" + activeTab), dataset2, options)
-					//$.plot($("#flot-placeholder3-" + activeTab), dataset3, options)
 				}
 			}
 			
 			function initCharts (activeTab, numberOfCharts){
 				if (activeTab != null){
 					while (tabData[activeTab]['data1'].length < totalPoints) {
-						//now = new Date().getTime();
 						var temp = [now += updateInterval, 0];
-						//tabData[activeTab]['data1'].push(temp);
-						//tabData[activeTab]['data2'].push(temp);
-						//tabData[activeTab]['data3'].push(temp);
 					
 						for (var j = 0; j < numberOfCharts; j++) {
 							tabData[activeTab]['data' + (j+1)].push(temp);
@@ -406,26 +381,11 @@
 					
 					}
 					
-					/*dataset1 = [
-					{ data: tabData[activeTab]['data1'], color: "#00FF00" }
-					];
-					dataset2 = [
-					{ data: tabData[activeTab]['data2'], color: "#00FF00" }
-					];
-					dataset3 = [
-					{ data: tabData[activeTab]['data3'], color: "#00FF00" }
-					];*/
-					
 					for (var j = 0; j < numberOfCharts; j++) {
 						$.plot($("#flot-placeholder"+ (j + 1) +"-" + activeTab)
 							, [{ data: tabData[activeTab]['data' + (j + 1)], color: "#00FF00" }]
 							, options).draw();
 					}
-
-					
-					//$.plot($("#flot-placeholder1-" + activeTab), dataset1, options);
-					//$.plot($("#flot-placeholder2-" + activeTab), dataset2, options);
-					//$.plot($("#flot-placeholder3-" + activeTab), dataset3, options);
 					
 					tabInterval[activeTab] = setInterval(updateCharts, 200, activeTab, numberOfCharts);
 					console.log("TAB INTERVAL: ", tabInterval[activeTab]);

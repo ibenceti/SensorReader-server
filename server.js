@@ -2,6 +2,8 @@ var express = require('express');
 var http = require('http');
 var io = require('socket.io');
 var path = require('path');
+var riak = require('basho-riak-client');
+var fs = require('fs');
 
 var mobileDevices = {};
 var mobileObservables = {};
@@ -20,7 +22,6 @@ appWeb.use(express.static(path.join(__dirname, '/public')));
 
 appWeb.get('/', function(req, res){
 	res.sendfile('index.html');
-	//res.send('<h1>Hello world</h1>');
 });
 
 ioMob.on('connection', function(socket){
@@ -34,6 +35,12 @@ ioMob.on('connection', function(socket){
 		//ioWeb.emit("test", msg, socket.id);
 		if (mobileObservables[socket.id] != null){
 			mobileObservables[socket.id].notifyObservers("data", msg, socket.id);
+			mobileObservables[socket.id].history.push(msg);
+
+			while(mobileObservables[socket.id].history.length > 60){
+				mobileObservables[socket.id].history.shift();
+			}
+			console.log('History len: ' + mobileObservables[socket.id].history.length);
 		}
 		ack();
 	});
@@ -108,6 +115,23 @@ ioWeb.on('connection', function(socket){
 		console.log('DEVICES SENT');
 	});
 	
+	socket.on('db_dump', function(deviceSocketId){
+		//TODO dump history to db
+		fs.writeFile('testFile.txt', mobileObservables[deviceSocketId].history, function(err){
+			if (err){
+				console.log('JEBIGA');
+			} else {
+				console.log('JUHU');
+			}
+			
+		
+		})
+	});
+	
+	socket.on('db_save_interval', function(deviceSocketId, interval){
+		//TODO save interval(seconds) to db
+	});
+	
 	socket.on('register_observer', function(observableSocket){
 		mobileObservables[observableSocket].addObserver( socket.id, function (type, msg, socketId){
 			if (type == "data"){
@@ -168,7 +192,8 @@ httpMob.listen(3000, function(){
 
 var Observable ={
 	
-	observers: []
+	history: []
+	,observers: []
 	, lastId: -1
 	,addObserver: function (observerId, observer){
 		this.observers.push({
