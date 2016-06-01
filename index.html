@@ -25,7 +25,7 @@
 				var tabTitle = $( "#tab_title" ),
 				tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>",
 				
-				tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId)' >Save period to DB</button>",
+				tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId, 60)' >Save period to DB</button>",
 				tabCounter = 2;
 				
 				var tabs = $( "#tabs" ).tabs();
@@ -181,6 +181,8 @@
 		
 		<button id="add_tab">Add Tab</button>
 		
+		<button type='button' onclick='queryButton()'>QueryDB</button>
+		
 		<div id="tabs">
 			<ul>
 			</ul>
@@ -287,13 +289,21 @@
 			}
 			
 			function button2(deviceSocketId) { 
-				socket.emit("dump_txt", deviceSocketId, function ( dataDump ){
+				socket.emit("txt_dump", deviceSocketId, function ( dataDump ){
 				
 				});
 			}
 
 			function button3(deviceSocketId, interval) { 
 				socket.emit("db_save_interval", deviceSocketId, interval);
+			}
+			
+			function queryButton() { 
+				socket.emit("db_query", "select * from SensorData where time > 1464792000 and time < 1464794000 and device_id = 'f2d3f2b8-ce92-457c-b56e-23080e10d2b8' and sensor_name = 'Gyroscope sensor'", function(rslt){
+					
+					var a = rslt;
+				
+				});
 			}
 			
 			
@@ -387,7 +397,7 @@
 							, options).draw();
 					}
 					
-					tabInterval[activeTab] = setInterval(updateCharts, 200, activeTab, numberOfCharts);
+					tabInterval[activeTab] = setInterval(updateCharts, updateInterval, activeTab, numberOfCharts);
 					console.log("TAB INTERVAL: ", tabInterval[activeTab]);
 				}
 			}

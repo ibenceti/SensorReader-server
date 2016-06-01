@@ -5,6 +5,9 @@ var path = require('path');
 var riak = require('basho-riak-client');
 var fs = require('fs');
 
+var riak_hosts = ['127.0.0.1:8087'];
+var riak_client = new riak.Client(riak_hosts);
+
 var mobileDevices = {};
 var mobileObservables = {};
 var webApps = {};
@@ -45,6 +48,15 @@ ioMob.on('connection', function(socket){
 		ack();
 	});
 	
+	
+	socket.on('update_device_data', function(msg){
+	
+		delete mobileDevices[socket.id];
+		mobileDevices[socket.id] = msg;
+		mobileObservables[socket.id].history = [];
+		mobileObservables[socket.id].observers = [];
+	});
+	
 	socket.on('register_device', function(msg){
 		
 		var parsed = JSON.parse(msg);
@@ -72,7 +84,11 @@ ioMob.on('connection', function(socket){
 		} else if (!(socket.id in mobileDevices)){
 			mobileObservables[socket.id] = Observable;
 			mobileDevices[socket.id] = msg;
-		}
+			}
+		//} else {
+		//	mobileDevices[socket.id] = msg;
+		//	mobileObservables[socket.id].history = [];
+		//}
 		
 		console.log('registered device: ' + msg);
 		console.log('registered device socket: ' + socket.id);
@@ -115,21 +131,163 @@ ioWeb.on('connection', function(socket){
 		console.log('DEVICES SENT');
 	});
 	
-	socket.on('db_dump', function(deviceSocketId){
+	socket.on('txt_dump', function(deviceSocketId){
 		//TODO dump history to db
 		fs.writeFile('testFile.txt', mobileObservables[deviceSocketId].history, function(err){
 			if (err){
-				console.log('JEBIGA');
+				console.log('Error saving file.');
 			} else {
-				console.log('JUHU');
+				console.log('File saved.');
 			}
 			
 		
 		})
 	});
 	
+	
+	socket.on('db_query', function(query, responseCallback){
+		
+		var cb = function (err, rslt){
+			if (rslt){
+				console.log('Query success.');
+				responseCallback(rslt);
+			} else if (err)
+				console.log('Query error.'  + err);
+				responseCallback(err);
+			}
+
+		var q = new riak.Commands.TS.Query.Builder()
+			.withQuery(query)
+			.withCallback(cb)
+			.build();
+		riak_client.execute(q);
+	});
+	
+	socket.on('db_dump', function(deviceSocketId){
+	
+		var rows = [];
+		for (var i = 0; i < mobileObservables[deviceSocketId].history.length; i++){
+			
+			var parsed = JSON.parse(mobileObservables[deviceSocketId].history[i]);
+			var resolution = parsed.resolution;
+			var device_id = parsed.device_id;
+			var device_name = parsed.device_name;
+			var sensor_name = parsed.sensor_name;
+			var sensor_data;
+			var time = parsed.start_timestamp;
+				
+			var tempRow = [];
+			sensor_data = "";
+			time = time + i * resolution;
+			for (var j = 0; j < parsed.data.length; j++){
+				if (j == 0){
+					sensor_data += parsed.data[j][i];
+				} else {
+					sensor_data += ', ' + parsed.data[j][i];
+				}
+			}
+				
+				tempRow.push(device_id);
+				tempRow.push(device_name);
+				tempRow.push(time);
+				tempRow.push(sensor_data);
+				tempRow.push(sensor_name);
+				rows.push(tempRow);
+		}
+			
+				var cb = function (err, rslt){
+					if (rslt){
+						mobileObservables[deviceSocketId].counter++;
+						console.log('Dumped to db: ' + rows.length);
+					}
+					else if (err)
+						console.log('Error saving to db.'  + err);
+				}
+			
+				var add = new riak.Commands.TS.Store.Builder()
+					.withTable('SensorData')
+					//.withColumns(columns)
+					.withRows(rows)
+					.withCallback(cb)
+					.build();
+				
+				riak_client.execute(add);
+	});
+	
 	socket.on('db_save_interval', function(deviceSocketId, interval){
-		//TODO save interval(seconds) to db
+		
+		mobileObservables[deviceSocketId].interval = interval;
+		mobileObservables[deviceSocketId].addObserver( 'riak', function (type ,msg, socketId){
+			
+			if (mobileObservables[deviceSocketId].interval ==  mobileObservables[deviceSocketId].counter){
+				
+				mobileObservables[deviceSocketId].removeObserver('riak');
+				mobileObservables[deviceSocketId].interval = 0;
+				mobileObservables[deviceSocketId].counter = 0;
+			
+			} else {
+			
+				var rows = [];
+				console.log('JOSN to DB: ' + msg);
+				var msgParsed = JSON.parse(msg);
+				var resolution = msgParsed.resolution;
+				var device_id = msgParsed.device_id;
+				var device_name = msgParsed.device_name;
+				var sensor_name = msgParsed.sensor_name;
+				var sensor_data;
+				var time = msgParsed.start_timestamp;
+			
+				for (var i = 0; i < msgParsed.data[0].length; i++){
+				
+					var tempRow = [];
+					sensor_data = "";
+					time = time + i * resolution;
+					for (var j = 0; j < msgParsed.data.length; j++){
+						if (j == 0){
+							sensor_data += msgParsed.data[j][i];
+						} else {
+							sensor_data += ', ' + msgParsed.data[j][i];
+						}
+					}
+				
+					tempRow.push(device_id);
+					tempRow.push(device_name);
+					tempRow.push(time);
+					tempRow.push(sensor_data);
+					tempRow.push(sensor_name);
+					rows.push(tempRow);
+				}
+			
+				console.log('Saving to db: ' + rows);
+			
+				var cb = function (err, rslt){
+					if (rslt){
+						mobileObservables[deviceSocketId].counter++;
+						console.log('Saved to db: ' + mobileObservables[deviceSocketId].counter);
+					}
+					else if (err)
+						console.log('Error saving to db.'  + err);
+				}
+			
+				/*var columns = [
+					{name: 'time', type: riak.Commands.TS.ColumnType.Timestamp},
+					{name: 'device_id', type: riak.Commands.TS.ColumnType.Varchar},
+					{name: 'device_name', type: riak.Commands.TS.ColumnType.Varchar},
+					{name: 'sensor_name', type: riak.Commands.TS.ColumnType.Varchar},
+					{name: 'sensor_data', type: riak.Commands.TS.ColumnType.Varchar}
+				];*/
+			
+				var add = new riak.Commands.TS.Store.Builder()
+					.withTable('SensorData')
+					//.withColumns(columns)
+					.withRows(rows)
+					.withCallback(cb)
+					.build();
+				
+				riak_client.execute(add);
+			
+			}//console.log('Msg sent to observer');
+		});
 	});
 	
 	socket.on('register_observer', function(observableSocket){
@@ -192,7 +350,9 @@ httpMob.listen(3000, function(){
 
 var Observable ={
 	
-	history: []
+	interval: 0
+	,counter: 0
+	,history: []
 	,observers: []
 	, lastId: -1
 	,addObserver: function (observerId, observer){
