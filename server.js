@@ -105,9 +105,9 @@ ioMob.on('connection', function(socket){
 				if (parsedDevice.id == parsed.id){
 					hasReconnected = true;
 					console.log('Mobile devices before remove: ' + Object.keys(mobileDevices).length);
-					var temp = mobileDevices[device];
+					//var temp = mobileDevices[device];
 					delete mobileDevices[device];
-					mobileDevices[socket.id] = temp;
+					mobileDevices[socket.id] = msg;
 					console.log('Mobile devices after remove: ' + Object.keys(mobileDevices).length);
 					console.log('Mobile observables before remove: ' + Object.keys(mobileObservables).length);
 					temp = mobileObservables[device];
@@ -126,9 +126,6 @@ ioMob.on('connection', function(socket){
 				mobileDevices[socket.id] = msg;
 				ack("new");
 			}
-			
-			
-			ioWeb.emit('devices_changed', mobileDevices);
 			
 		} else if (!(socket.id in mobileDevices)){
 			mobileObservables[socket.id] = Observable;
@@ -336,9 +333,9 @@ ioWeb.on('connection', function(socket){
 		});
 	});
 	
-	socket.on('db_save_continuous', function(deviceSocketId){
+	socket.on('db_save_continuous', function(deviceSocketId, tag){
 		
-		mobileObservables[deviceSocketId].addObserver( 'riak', function (type ,msg, socketId){
+		mobileObservables[deviceSocketId].addObserver( 'DB_' + socket.id, function (type ,msg, socketId){
 
 			var rows = [];
 			console.log('JOSN to DB: ' + msg);
@@ -400,13 +397,21 @@ ioWeb.on('connection', function(socket){
 				
 			riak_client.execute(add);
 		});
+		
+		if (mobileObservables[deviceSocketId].observers.length != 0){
+			
+			ioMob.sockets.connected[deviceSocketId].emit("start_sending");
+			console.log('Observers length: ' + mobileObservables[deviceSocketId].observers.length );
+		}
+		
+		console.log('Observer registered: DB_' + socket.id);
 	});
 	
 	socket.on('db_stop_continuous', function(deviceSocketId){
 		
 		if (mobileObservables[deviceSocketId] != null){
-			mobileObservables[deviceSocketId].removeObserver('riak')
-			console.log('Observer unregistered: ' + deviceSocketId + "  " + mobileObservables[deviceSocketId]);
+			mobileObservables[deviceSocketId].removeObserver('DB_' + socket.id)
+			console.log('Observer unregistered: DB_' + socket.id);
 			console.log('Observers length: ' + mobileObservables[deviceSocketId].observers.length );
 
 			if (mobileObservables[deviceSocketId].observers.length == 0){

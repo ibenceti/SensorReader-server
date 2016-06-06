@@ -151,25 +151,13 @@
 				// close icon: removing the tab on click
 				tabs.delegate( "span.ui-icon-close", "click", function() {
 					var panelId = $( this ).closest( "li" ).remove().attr( "aria-controls" );
-					clearInterval(tabInterval[panelId]);
-					socket.emit("unregister_observer",  tabSockets[panelId]);
-					delete tabSockets[panelId];
-					delete tabInterval[panelId];
-					delete tabData[panelId];
-					$( "#" + panelId ).remove();
-					tabs.tabs( "refresh" );
+					stopWatchingDevice($('#device-watch-btn-' + tabSockets[panelId].substring(2))[0]);
 				});
 				
 				tabs.bind( "keyup", function( event ) {
 					if ( event.altKey && event.keyCode === $.ui.keyCode.BACKSPACE ) {
 						var panelId = tabs.find( ".ui-tabs-active" ).remove().attr( "aria-controls" );
-						clearInterval(tabInterval[panelId]);
-						socket.emit("unregister_observer",  tabSockets[panelId]);
-						delete tabSockets[panelId];
-						delete tabInterval[panelId];
-						delete tabData[panelId];
-						$( "#" + panelId ).remove();
-						tabs.tabs( "refresh" );
+						stopWatchingDevice($('#device-watch-btn-' + tabSockets[panelId].substring(2))[0]);
 					}
 				});
 			});
@@ -248,8 +236,8 @@
 			var totalPoints = 250;
 			var updateInterval;
 			var tabCounter = 0;
-			var tabTemplate = "<li><a href='#{href}'>#{label}</a></li>";
-			//var tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>";
+			//var tabTemplate = "<li><a href='#{href}'>#{label}</a></li>";
+			var tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>";
 			var tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId, 60)' >Save period to DB</button>";
 			var tabs = $( "#tabs" ).tabs();
 
@@ -311,15 +299,25 @@
 
 			socket.on("reconnect", function (oldSocketId, newSocketId) {
 				
-				var temp;
+				var panelId;
 				for (var c in tabSockets) {
 					if (tabSockets[c] == oldSocketId){
-						temp = c;
+						panelId = c;
 					}
 				}
+				
+				var oldSocketKey = oldSocketId.substring(2);
+				var newSocketKey = newSocketId.substring(2);
+				//var deviceItemRow = $('#device-row-' + newSocketKey)[0];
+				//var editedItemRow = $( deviceItemRow.replace( /newSocketKey/g, newSocketKey));
+				var socketButton = $('#device-watch-btn-' + oldSocketKey)[0];
+				socketButton.onclick = function(){
+					stopWatchingDevice(socketButton);
+				}
+				socketButton.innerHTML = "Stop watching";
 					
-				delete tabSockets[c];
-				tabSockets[c] = newSocketId;
+				delete tabSockets[panelId];
+				tabSockets[panelId] = newSocketId;
 			});
 
 			socket.on("devices_changed", function (newDevices) {
@@ -386,16 +384,16 @@
 				
 				$("#table-devices").remove();
 				$("#container-devices").append( "<div id='table-devices' class= 'table'></div>" );
-				$("#table-devices").append( "<thead><tr><th>Device</th><th>Sensor</th><th>Vendor</th><th>Resolution</th><th>DB status</th><th>Watching</th></tr></thead>" );
+				$("#table-devices").append( "<thead><tr><th>Device</th><th>Sensor</th><th>Vendor</th><th>Resolution</th><th>DB tag</th><th>DB status</th><th>Watching</th></tr></thead>" );
 				
 				socket.emit("request_devices", function (serverDevices){
 						devices = serverDevices;
 						console.log("REGISTERED_DEVICES: ", serverDevices);
 						for(key in devices){
 							var device = JSON.parse(devices[key]);
-							$("#table-devices").append( '<tbody><tr id=device-row-'+ key +'"><td>'+device.device+'</td><td>'+device.sensor+'</td><td>'+device.sensor_vendor+'</td><td>'+device.resolution+'</td><td><button id=device-watch-btn-'+ key +' type="button" class="btn btn-default" value="'+key+'" onclick="saveToDB(this)">Save to DB</button</td><td><button id=db-save-btn-'+ key +' type="button" class="btn btn-default" value="'+key+'" onclick="watchDevice(this)">Watch</button</td></tr></tbody>' );
-							
-							
+							var deviceItemTemplate = '<tbody><tr id=device-row-'+ key.substring(2) +'"><td>'+device.device+'</td><td>'+device.sensor+'</td><td>'+device.sensor_vendor+'</td><td>'+device.resolution+'</td><td><input type="text" class="form-control" id="text-tag-'+key.substring(2)+'"></td><td><button id=device-db-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="saveToDB(this)">Save to DB</button</td><td><button id=device-watch-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="watchDevice(this)">Watch</button</td></tr></tbody>';
+
+							$("#table-devices").append(deviceItemTemplate);
 						}
 					});
 			}
@@ -492,7 +490,27 @@
 			}
 				
 			function saveToDB(button) { 
-				socket.emit("db_save_continuous", button.value);
+			
+				var tag = $('#text-tag-' + button.value.substring(2))[0].value;
+				
+				if (tag)
+					socket.emit("db_save_continuous", button.value, tag);
+				else
+					socket.emit("db_save_continuous", button.value, "measurement_" +  new Date().getTime());
+					
+				button.onclick = function(){
+					stopSavingToDB(button);
+				}
+				button.innerHTML = "Stop saving to DB";
+			}
+			
+			function stopSavingToDB(button){
+				socket.emit("db_stop_continuous", button.value);
+				
+				button.onclick = function(){
+					saveToDB(button);
+				}
+				button.innerHTML = "Save to DB";
 			}
 		</script>  
 	</body>
