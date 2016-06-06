@@ -51,63 +51,111 @@ ioMob.on('connection', function(socket){
 	
 	socket.on('update_device_data', function(msg){
 	
-		delete mobileDevices[socket.id];
-		mobileDevices[socket.id] = msg;
-		mobileObservables[socket.id].history = [];
-		mobileObservables[socket.id].observers = [];
+		if (socket.id in mobileDevices){
+			delete mobileDevices[socket.id];
+			mobileDevices[socket.id] = msg;
+			mobileObservables[socket.id].history = [];
+			mobileObservables[socket.id].observers = [];
+			ioWeb.emit('devices_changed', mobileDevices);
+		}
 	});
 	
-	socket.on('register_device', function(msg){
+	socket.on('register_device', function(msg, ack){
 		
 		var parsed = JSON.parse(msg);
+		
+		var Observable ={
+	
+			interval: 0
+			,counter: 0
+			,history: []
+			,observers: []
+			, lastId: -1
+			,addObserver: function (observerId, observer){
+				this.observers.push({
+					callback: observer
+					, id: observerId
+				})
+				return observerId
+			}
+			,removeObserver: function(id){
+				for (var i = this.observers.length - 1; i >= 0; i--){
+					this.observers[i]
+					if (this.observers[i].id == id){
+						this.observers.splice(i, 1)
+						return true
+					}
+				}
+				return false
+			}
+			, notifyObservers: function(type, message, socketId){
+				for (var i = this.observers.length - 1; i >= 0; i--){
+					this.observers[i].callback(type, message, socketId)
+				}
+			}
+		}			
 
 		if (parsed.hasOwnProperty('reconnection')){
+			
+			var hasReconnected = false;
 
 			for (var device in mobileDevices){
 				var parsedDevice = JSON.parse(mobileDevices[device]);
 
 				if (parsedDevice.id == parsed.id){
-					console.log('Mobile devices before remove: ' + mobileDevices[device]);
+					hasReconnected = true;
+					console.log('Mobile devices before remove: ' + Object.keys(mobileDevices).length);
 					var temp = mobileDevices[device];
 					delete mobileDevices[device];
 					mobileDevices[socket.id] = temp;
-					console.log('Mobile devices after remove: ' + mobileDevices[socket.id]);
-					console.log('Mobile observables before remove: ' + mobileObservables[device]);
+					console.log('Mobile devices after remove: ' + Object.keys(mobileDevices).length);
+					console.log('Mobile observables before remove: ' + Object.keys(mobileObservables).length);
 					temp = mobileObservables[device];
 					delete mobileObservables[device];
 					mobileObservables[socket.id] = temp;
-					console.log('Mobile observables after remove: ' + mobileObservables[socket.id]);
-					mobileObservables[socket.id].notifyObservers("reconnect" ,device, socket.id);
+					console.log('Mobile observables after remove: ' + Object.keys(mobileObservables).length);			
+					//socket.disconnect(device);
+					mobileObservables[socket.id].notifyObservers("reconnect" ,device, socket.id);	
+					ack("old");
 
 				}
 			}
+			
+			if (!hasReconnected && !(socket.id in mobileDevices)){
+				mobileObservables[socket.id] = Observable;
+				mobileDevices[socket.id] = msg;
+				ack("new");
+			}
+			
+			
+			ioWeb.emit('devices_changed', mobileDevices);
+			
 		} else if (!(socket.id in mobileDevices)){
 			mobileObservables[socket.id] = Observable;
+			mobileObservables[socket.id].history =[];
+			mobileObservables[socket.id].observers = [];
 			mobileDevices[socket.id] = msg;
-			}
-		//} else {
-		//	mobileDevices[socket.id] = msg;
-		//	mobileObservables[socket.id].history = [];
-		//}
+			ioWeb.emit('devices_changed', mobileDevices);
+			ack("new");
+		}
 		
 		console.log('registered device: ' + msg);
 		console.log('registered device socket: ' + socket.id);
-		
-		console.log('registered device: ' + parsed.type + parsed.resolution + parsed.sensor);
 		console.log('registered devices: ' + mobileDevices);
 	});
 	
 	socket.on('disconnect', function(){
 		
 		console.log('Mob user disconnected: ' + socket.id);
+		//mobileObservables[socket.id].observers = [];
+		//mobileObservables[socket.id].history = [];
 		delete mobileObservables[socket.id];
 		console.log('Mob observable unregistered');
 		console.log('Mob device length: ' + Object.keys(mobileObservables).length);
 		delete mobileDevices[socket.id];
 		console.log('Mob device unregistered.');
 		console.log('Mob device length: ' + Object.keys(mobileDevices).length);
-		
-		
+		ioWeb.emit('devices_changed', mobileDevices);
 	});
 	
 });
@@ -132,7 +180,6 @@ ioWeb.on('connection', function(socket){
 	});
 	
 	socket.on('txt_dump', function(deviceSocketId){
-		//TODO dump history to db
 		fs.writeFile('testFile.txt', mobileObservables[deviceSocketId].history, function(err){
 			if (err){
 				console.log('Error saving file.');
@@ -206,7 +253,6 @@ ioWeb.on('connection', function(socket){
 			
 				var add = new riak.Commands.TS.Store.Builder()
 					.withTable('SensorData')
-					//.withColumns(columns)
 					.withRows(rows)
 					.withCallback(cb)
 					.build();
@@ -290,6 +336,86 @@ ioWeb.on('connection', function(socket){
 		});
 	});
 	
+	socket.on('db_save_continuous', function(deviceSocketId){
+		
+		mobileObservables[deviceSocketId].addObserver( 'riak', function (type ,msg, socketId){
+
+			var rows = [];
+			console.log('JOSN to DB: ' + msg);
+			var msgParsed = JSON.parse(msg);
+			var resolution = msgParsed.resolution;
+			var device_id = msgParsed.device_id;
+			var device_name = msgParsed.device_name;
+			var sensor_name = msgParsed.sensor_name;
+			var sensor_data;
+			var time = msgParsed.start_timestamp;
+			
+			for (var i = 0; i < msgParsed.data[0].length; i++){
+				
+				var tempRow = [];
+				sensor_data = "";
+				time = time + i * resolution;
+				for (var j = 0; j < msgParsed.data.length; j++){
+					if (j == 0){
+						sensor_data += msgParsed.data[j][i];
+					} else {
+						sensor_data += ', ' + msgParsed.data[j][i];
+					}
+				}
+				
+				tempRow.push(device_id);
+				tempRow.push(device_name);
+				tempRow.push(time);
+				tempRow.push(sensor_data);
+				tempRow.push(sensor_name);
+				rows.push(tempRow);
+			}
+			
+			console.log('Saving to db: ' + rows);
+			
+			var cb = function (err, rslt){
+				if (rslt){
+					mobileObservables[deviceSocketId].counter++;
+					console.log('Saved to db: ' + mobileObservables[deviceSocketId].counter);
+				}
+				else if (err)
+					console.log('Error saving to db.'  + err);
+			}
+			
+				/*var columns = [
+					{name: 'time', type: riak.Commands.TS.ColumnType.Timestamp},
+					{name: 'device_id', type: riak.Commands.TS.ColumnType.Varchar},
+					{name: 'device_name', type: riak.Commands.TS.ColumnType.Varchar},
+					{name: 'sensor_name', type: riak.Commands.TS.ColumnType.Varchar},
+
+					{name: 'sensor_data', type: riak.Commands.TS.ColumnType.Varchar}
+				];*/
+			
+			var add = new riak.Commands.TS.Store.Builder()
+				.withTable('SensorData')
+				//.withColumns(columns)
+				.withRows(rows)
+				.withCallback(cb)
+				.build();
+				
+			riak_client.execute(add);
+		});
+	});
+	
+	socket.on('db_stop_continuous', function(deviceSocketId){
+		
+		if (mobileObservables[deviceSocketId] != null){
+			mobileObservables[deviceSocketId].removeObserver('riak')
+			console.log('Observer unregistered: ' + deviceSocketId + "  " + mobileObservables[deviceSocketId]);
+			console.log('Observers length: ' + mobileObservables[deviceSocketId].observers.length );
+
+			if (mobileObservables[deviceSocketId].observers.length == 0){
+				ioMob.sockets.connected[deviceSocketId].emit("stop_sending");
+				mobileObservables[deviceSocketId].history = [];
+			}
+		}
+	});
+	
 	socket.on('register_observer', function(observableSocket){
 		mobileObservables[observableSocket].addObserver( socket.id, function (type, msg, socketId){
 			if (type == "data"){
@@ -304,7 +430,7 @@ ioWeb.on('connection', function(socket){
 		if (mobileObservables[observableSocket].observers.length != 0){
 			
 			ioMob.sockets.connected[observableSocket].emit("start_sending");
-			console.log('Observables length: ' + mobileObservables[observableSocket].observers.length );
+			console.log('Observers length: ' + mobileObservables[observableSocket].observers.length );
 		}
 		
 		console.log('Observer registered: ' + observableSocket + "  " + mobileObservables[observableSocket]);
@@ -319,10 +445,9 @@ ioWeb.on('connection', function(socket){
 
 			if (mobileObservables[observableSocket].observers.length == 0){
 				ioMob.sockets.connected[observableSocket].emit("stop_sending");
+				mobileObservables[observableSocket].history = [];
 			}
 		}
-		
-		
 	});
 	
 	socket.on('disconnect', function(){
@@ -331,6 +456,7 @@ ioWeb.on('connection', function(socket){
 			mobileObservables[obs].removeObserver(socket.id);
 			
 			if (mobileObservables[obs].observers.length == 0){
+				mobileObservables[obs].history = [];
 				ioMob.sockets.connected[obs].emit("stop_sending");
 			}
 		}
@@ -347,34 +473,3 @@ httpWeb.listen(3030, function(){
 httpMob.listen(3000, function(){
 	console.log('Mob listening on *:3000');
 });
-
-var Observable ={
-	
-	interval: 0
-	,counter: 0
-	,history: []
-	,observers: []
-	, lastId: -1
-	,addObserver: function (observerId, observer){
-		this.observers.push({
-			callback: observer
-			, id: observerId
-		})
-		return observerId
-	}
-	,removeObserver: function(id){
-		for (var i = this.observers.length - 1; i >= 0; i--){
-			this.observers[i]
-			if (this.observers[i].id == id){
-				this.observers.splice(i, 1)
-				return true
-			}
-		}
-		return false
-	}
-	, notifyObservers: function(type, message, socketId){
-		for (var i = this.observers.length - 1; i >= 0; i--){
-			this.observers[i].callback(type, message, socketId)
-		}
-	}
-}			
