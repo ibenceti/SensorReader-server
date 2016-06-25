@@ -2,11 +2,17 @@ var express = require('express');
 var http = require('http');
 var io = require('socket.io');
 var path = require('path');
+
 var riak = require('basho-riak-client');
+var pg = require('pg');
+
 var fs = require('fs');
 
 var riak_hosts = ['127.0.0.1:8087'];
 var riak_client = new riak.Client(riak_hosts);
+
+var pgConnectionString = 'postgres://postgres:postgres@localhost:5432/device_data'
+//var	pg_client = new pg.Client(pgConnectionString).connect();
 
 var mobileDevices = {};
 var mobileObservables = {};
@@ -62,6 +68,8 @@ ioMob.on('connection', function(socket){
 	
 	socket.on('register_device', function(msg, ack){
 		
+		checkAndSaveDevicePG(msg);
+		
 		var parsed = JSON.parse(msg);
 		
 		var Observable ={
@@ -104,17 +112,20 @@ ioMob.on('connection', function(socket){
 
 				if (parsedDevice.id == parsed.id){
 					hasReconnected = true;
+					
+					//replace old socket.id in devices list
 					console.log('Mobile devices before remove: ' + Object.keys(mobileDevices).length);
-					//var temp = mobileDevices[device];
 					delete mobileDevices[device];
 					mobileDevices[socket.id] = msg;
 					console.log('Mobile devices after remove: ' + Object.keys(mobileDevices).length);
 					console.log('Mobile observables before remove: ' + Object.keys(mobileObservables).length);
+					
+					//replace old socket.id in observables list
 					temp = mobileObservables[device];
 					delete mobileObservables[device];
 					mobileObservables[socket.id] = temp;
 					console.log('Mobile observables after remove: ' + Object.keys(mobileObservables).length);			
-					//socket.disconnect(device);
+					//ioWeb.emit('devices_changed');
 					mobileObservables[socket.id].notifyObservers("reconnect" ,device, socket.id);	
 					ack("old");
 
@@ -124,6 +135,7 @@ ioMob.on('connection', function(socket){
 			if (!hasReconnected && !(socket.id in mobileDevices)){
 				mobileObservables[socket.id] = Observable;
 				mobileDevices[socket.id] = msg;
+				ioWeb.emit('devices_changed', mobileDevices);
 				ack("new");
 			}
 			
@@ -215,8 +227,6 @@ ioWeb.on('connection', function(socket){
 			var parsed = JSON.parse(mobileObservables[deviceSocketId].history[i]);
 			var resolution = parsed.resolution;
 			var device_id = parsed.device_id;
-			var device_name = parsed.device_name;
-			var sensor_name = parsed.sensor_name;
 			var sensor_data;
 			var time = parsed.start_timestamp;
 				
@@ -232,10 +242,9 @@ ioWeb.on('connection', function(socket){
 			}
 				
 				tempRow.push(device_id);
-				tempRow.push(device_name);
 				tempRow.push(time);
+				tempRow.push(tag);
 				tempRow.push(sensor_data);
-				tempRow.push(sensor_name);
 				rows.push(tempRow);
 		}
 			
@@ -249,7 +258,7 @@ ioWeb.on('connection', function(socket){
 				}
 			
 				var add = new riak.Commands.TS.Store.Builder()
-					.withTable('SensorData')
+					.withTable('sensor_data_bucket')
 					.withRows(rows)
 					.withCallback(cb)
 					.build();
@@ -273,10 +282,7 @@ ioWeb.on('connection', function(socket){
 				var rows = [];
 				console.log('JOSN to DB: ' + msg);
 				var msgParsed = JSON.parse(msg);
-				var resolution = msgParsed.resolution;
 				var device_id = msgParsed.device_id;
-				var device_name = msgParsed.device_name;
-				var sensor_name = msgParsed.sensor_name;
 				var sensor_data;
 				var time = msgParsed.start_timestamp;
 			
@@ -294,10 +300,9 @@ ioWeb.on('connection', function(socket){
 					}
 				
 					tempRow.push(device_id);
-					tempRow.push(device_name);
 					tempRow.push(time);
+					tempRow.push(tag);
 					tempRow.push(sensor_data);
-					tempRow.push(sensor_name);
 					rows.push(tempRow);
 				}
 			
@@ -321,7 +326,7 @@ ioWeb.on('connection', function(socket){
 				];*/
 			
 				var add = new riak.Commands.TS.Store.Builder()
-					.withTable('SensorData')
+					.withTable('sensor_data_bucket')
 					//.withColumns(columns)
 					.withRows(rows)
 					.withCallback(cb)
@@ -329,11 +334,15 @@ ioWeb.on('connection', function(socket){
 				
 				riak_client.execute(add);
 			
-			}//console.log('Msg sent to observer');
+			}
 		});
 	});
 	
 	socket.on('db_save_continuous', function(deviceSocketId, tag){
+	
+		var device = JSON.parse(mobileDevices[deviceSocketId])
+		console.log('Device: ' + mobileDevices[deviceSocketId]);
+		insertMeasurementPG (device.id, tag, device.resolution, new Date().getTime(), device.sensor);
 		
 		mobileObservables[deviceSocketId].addObserver( 'DB_' + socket.id, function (type ,msg, socketId){
 
@@ -342,8 +351,6 @@ ioWeb.on('connection', function(socket){
 			var msgParsed = JSON.parse(msg);
 			var resolution = msgParsed.resolution;
 			var device_id = msgParsed.device_id;
-			var device_name = msgParsed.device_name;
-			var sensor_name = msgParsed.sensor_name;
 			var sensor_data;
 			var time = msgParsed.start_timestamp;
 			
@@ -356,15 +363,14 @@ ioWeb.on('connection', function(socket){
 					if (j == 0){
 						sensor_data += msgParsed.data[j][i];
 					} else {
-						sensor_data += ', ' + msgParsed.data[j][i];
+						sensor_data += ',' + msgParsed.data[j][i];
 					}
 				}
 				
 				tempRow.push(device_id);
-				tempRow.push(device_name);
+				tempRow.push(tag);
 				tempRow.push(time);
 				tempRow.push(sensor_data);
-				tempRow.push(sensor_name);
 				rows.push(tempRow);
 			}
 			
@@ -379,18 +385,9 @@ ioWeb.on('connection', function(socket){
 					console.log('Error saving to db.'  + err);
 			}
 			
-				/*var columns = [
-					{name: 'time', type: riak.Commands.TS.ColumnType.Timestamp},
-					{name: 'device_id', type: riak.Commands.TS.ColumnType.Varchar},
-					{name: 'device_name', type: riak.Commands.TS.ColumnType.Varchar},
-					{name: 'sensor_name', type: riak.Commands.TS.ColumnType.Varchar},
-
-					{name: 'sensor_data', type: riak.Commands.TS.ColumnType.Varchar}
-				];*/
-			
+				
 			var add = new riak.Commands.TS.Store.Builder()
-				.withTable('SensorData')
-				//.withColumns(columns)
+				.withTable('sensor_data_bucket')
 				.withRows(rows)
 				.withCallback(cb)
 				.build();
@@ -417,8 +414,16 @@ ioWeb.on('connection', function(socket){
 			if (mobileObservables[deviceSocketId].observers.length == 0){
 				ioMob.sockets.connected[deviceSocketId].emit("stop_sending");
 				mobileObservables[deviceSocketId].history = [];
+				mobileObservables[deviceSocketId].counter = 0;
 			}
 		}
+	});
+	
+	socket.on('request_db_tags', function(deviceId, callback){
+		
+		getMeasurementsForDevicePG (deviceId, function(results){
+			callback(results); 
+		});
 	});
 	
 	socket.on('register_observer', function(observableSocket){
@@ -459,6 +464,7 @@ ioWeb.on('connection', function(socket){
 		
 		for (var obs in mobileObservables){
 			mobileObservables[obs].removeObserver(socket.id);
+			mobileObservables[obs].removeObserver('DB_' + socket.id);
 			
 			if (mobileObservables[obs].observers.length == 0){
 				mobileObservables[obs].history = [];
@@ -478,3 +484,83 @@ httpWeb.listen(3030, function(){
 httpMob.listen(3000, function(){
 	console.log('Mob listening on *:3000');
 });
+
+function checkAndSaveDevicePG( deviceData ){
+	
+	//check if device in table
+	var parsedDevice = JSON.parse(deviceData);
+	var deviceExists = false;
+	pg.connect(pgConnectionString, function (err, client, done){
+		if (err){
+			console.log('Error fetching clinet from pool:' + err);
+		}
+		
+		var query = client.query("SELECT * FROM devices WHERE device_id ='" + parsedDevice.id + "';");
+		query.on('row', function(row){
+			deviceExists = true;
+		});
+		
+		query.on('end', function(){
+			done();
+				//if device not in table insert new row
+			if (!deviceExists){
+				pg.connect(pgConnectionString, function (err, client, done){
+					if (err){
+						console.log('Error fetching clinet from pool:' + err);
+					}
+		
+					console.log("INSERT INTO devices(device_id, time_registered, device_name) VALUES ('"+ parsedDevice.id +"', '" + new Date().getTime() + "', '"+ parsedDevice.name + "')");
+					var query = client.query("INSERT INTO devices(device_id, time_registered, device_name) VALUES ('"+ parsedDevice.id +"', '" + new Date().getTime() + "', '"+ parsedDevice.device + "')");
+					query.on('row', function(row){
+					});
+		
+					query.on('end', function(){
+						done();
+					});
+				});	
+			}
+		});
+	});
+	
+}
+
+function getMeasurementsForDevicePG (deviceId, callback){
+
+	var results = [];
+
+	pg.connect(pgConnectionString, function (err, client, done){
+		if (err){
+			console.log('Error fetching clinet from pool:' + err);
+		}
+		
+		var query = client.query("SELECT * FROM devices JOIN  measurements ON devices.device_id = measurements.device_id WHERE devices.device_id ='" + deviceId + "' GROUP BY devices.id, measurements.id, tag, time_start;");
+		query.on('row', function(row){
+			console.log('Result:' + JSON.stringify(row));
+			results.push(JSON.stringify(row));
+		});
+		
+		query.on('end', function(){
+			done();
+			callback(results);
+		});
+	});
+}
+
+function insertMeasurementPG (deviceId, tag, resolution, startTime, sensorName){
+
+	pg.connect(pgConnectionString, function (err, client, done){
+					if (err){
+						console.log('Error fetching clinet from pool:' + err);
+					}
+					var query = client.query("INSERT INTO measurements(device_id, time_start, tag, resolution, sensor_name) VALUES ('"+ deviceId +"', '" + startTime + "', '"+ tag + "', '"+ resolution + "', '" + sensorName + "')");
+					query.on('row', function(row){
+					});
+		
+					query.on('end', function(){
+						done();
+					});
+				});
+	
+}
+
+

@@ -26,141 +26,10 @@
 		
 		//populate device list on start
 		$(document).ready( function (){
-			populateDevices();
+			populateDevices(false);
 		});
 		
-			$(function() {
-				var tabTitle = $( "#tab_title" ),
-				tabCounter = 2;
-				
-				// modal dialog init: custom buttons and a "close" callback resetting the form inside
-				var dialog = $( "#dialog" ).dialog({
-					autoOpen: false,
-					modal: true,
-					position: { at: "center", of: "#tabs"},
-					buttons: {
-						Add: function() {
-							addTab();
-							$( this ).dialog( "close" );
-						},
-						Cancel: function() {
-							$( this ).dialog( "close" );
-						}
-					},
-					close: function() {
-						form[ 0 ].reset();
-					}
-				});
-				
-				// addTab form: calls addTab function on submit and closes the dialog
-				var form = dialog.find( "form" ).submit(function( event ) {
-					addTab();
-					dialog.dialog( "close" );
-					event.preventDefault();
-				});
-				
-				// actual addTab function: adds new tab using the input from the form above
-				function addTab() {
-					var label = tabTitle.val() || "Tab " + tabCounter,
-					id = "tabs-" + tabCounter,
-					li = $( tabTemplate.replace( /#\{href\}/g, "#" + id ).replace( /#\{label\}/g, label ) ),
-					//tabContentHtml = tabContent.val() || "Tab " + tabCounter + " content.";
-					tabContentHtml = tabContentTemplate;
-					
-					var selectedDevice = devices[$("#devicesSelector").val()];
-					var parsedObservableInfo = JSON.parse(selectedDevice);
-					var dataFields = parsedObservableInfo.data_fields;
-					var sensorName = parsedObservableInfo.sensor;
-					var device = parsedObservableInfo.device;
-					var maxrange = parsedObservableInfo.device;
-					var totalPoints = 250;
-					var updateInterval = parsedObservableInfo.resolution;
-					var now = new Date().getTime();
-					
-					var options = {
-						series: {
-							shadowSize: 0,
-							lines: {
-								show: true,
-								lineWidth: 1.2,
-								fill: false
-							}
-						},
-						xaxis: {
-							show:false
-						},
-						yaxis: {
-							min: -parsedObservableInfo.sensor_maxrange,
-							max: parsedObservableInfo.sensor_maxrange,
-							tickSize: parsedObservableInfo.sensor_maxrange/3,
-						},
-						legend: {        
-							labelBoxBorderColor: "#fff"
-						},
-						grid: {                
-							backgroundColor: "#000000",
-							tickColor: "#008040"
-						}
-					};
-
-					for (var j = 1; j<=dataFields; j++){
-						tabContentHtml += "<div id='flot-placeholder" + j + "-" + id + "' style='width:800px;height:200px;margin:0 auto'></div>"
-					}
-					
-					
-					
-					tabSockets[id] = $("#devicesSelector").val()
-					tabData[id] = {};
-					for (var j = 1; j<=dataFields; j++){
-						var a = "data" + j;
-						var b = "dataBuff" + j;
-						tabData[id][a] = [];
-						tabData[id][b] = [];
-					}
-					
-					socket.emit("register_observer",  $("#devicesSelector").val())
-					
-					tabs.find( ".ui-tabs-nav" ).append( li );
-					tabs.append( "<div id='" + id + "'><p>" + tabContentHtml + "</p></div>" );
-					tabs.tabs( "refresh" );
-					tabCounter++;
-					
-					tabInterval[id] = setInterval(updateCharts, updateInterval, id, dataFields, options, updateInterval);
-					//updateCharts (id, dataFields, options, updateInterval);
-				}
-				
-				// addTab button: just opens the dialog
-				$( "#add_tab" )
-				.button()
-				.click(function() {
-					socket.emit("request_devices", function (serverDevices){
-						devices = serverDevices;
-						console.log("REGISTERED_DEVICES: ", serverDevices);
-						
-						$("#devicesSelector").find('option').remove();
-						for(key in devices){
-							var device = JSON.parse(devices[key]);
-							console.log("DEVICE: ", device);
-							$("#devicesSelector").append('<option value="'+ key+'">'+device.device+'</option>');
-						}
-						
-						dialog.dialog( "open" );
-					});
-				});
-				
-				// close icon: removing the tab on click
-				tabs.delegate( "span.ui-icon-close", "click", function() {
-					var panelId = $( this ).closest( "li" ).remove().attr( "aria-controls" );
-					stopWatchingDevice($('#device-watch-btn-' + tabSockets[panelId].substring(2))[0]);
-				});
-				
-				tabs.bind( "keyup", function( event ) {
-					if ( event.altKey && event.keyCode === $.ui.keyCode.BACKSPACE ) {
-						var panelId = tabs.find( ".ui-tabs-active" ).remove().attr( "aria-controls" );
-						stopWatchingDevice($('#device-watch-btn-' + tabSockets[panelId].substring(2))[0]);
-					}
-				});
-			});
+			
 		</script>
 	</head>
 	<body bgcolor=white>
@@ -173,6 +42,31 @@
 			</tr>
 		</table>
 		
+		<!-- modal -->
+		<div class="modal fade" id="tagModal" tabindex="-1" role="dialog" aria-labelledby="tagModalLabel" aria-hidden="true">
+			<div class="modal-dialog" role="document">
+				<div class="modal-content" role="document">
+					<div class="modal-header" role="document">
+						<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+							<span aria-hidden="true">&times;</span>
+						</button>
+						<h2 class="modal-title" id="tagModalTitle">Modal title</h2>
+					</div>
+					<div class="modal-body">
+						<form>
+							<fieldset class="ui-helper-reset">
+								<label for="tagsSelector">Select tag</label>
+								<select name="tagsSelector" id="tagsSelector"></select>
+							</fieldset>
+						</form>	
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+						<button type="button" onclick="queryTimeDB()" class="btn btn-primary" data-dismiss="modal">Open</button>
+					</div>
+				</div>
+			</div>
+		</div>
 		
 		<div class="container-fluid">
 			<div class="row">
@@ -198,22 +92,9 @@
 
 			<div class="row">
 				<div class="col-md-12">
-					<div id="dialog" title="Tab data">
-						<form>
-							<fieldset class="ui-helper-reset">
-								<label for="tab_title">Title</label>
-								<input type="text" name="tab_title" required id="tab_title" value="Tab Title" class="ui-widget-content ui-corner-all">
-								<label for="devicesSelector">Select device</label>
-								<select name="devicesSelector" id="devicesSelector"></select>
-							</fieldset>
-						</form>	
+					<div id="dialog" title="Tag data">
+						
 					</div>
-		
-					<!--
-					<button id="add_tab">Add Tab</button>
-		
-					<button type='button' onclick='queryButton()'>QueryDB</button>
-					-->
 					<div id="tabs">
 						<ul>
 						</ul>
@@ -238,36 +119,31 @@
 			var tabCounter = 0;
 			//var tabTemplate = "<li><a href='#{href}'>#{label}</a></li>";
 			var tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>";
-			var tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId, 60)' >Save period to DB</button>";
+			var tabContentTemplate = "";
+			//var tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId, 60)' >Save period to DB</button>";
 			var tabs = $( "#tabs" ).tabs();
-
-			function button1(deviceSocketId) { 
-				socket.emit("db_dump", deviceSocketId, function (){
-					//notify dumped
-				});
-			}
 			
-			function button2(deviceSocketId) { 
-				socket.emit("txt_dump", deviceSocketId, function ( dataDump ){
-				
-				});
-			}
-
-			function button3(deviceSocketId, interval) { 
-				socket.emit("db_save_interval", deviceSocketId, interval);
-			}
-			
-			function queryButton() { 
-				socket.emit("db_query", "select * from SensorData where time > 1464792000 and time < 1464794000 and device_id = 'f2d3f2b8-ce92-457c-b56e-23080e10d2b8' and sensor_name = 'Gyroscope sensor'", function(rslt){
-					
-					var a = rslt;
-				
-				});
+			function ab2str (arrayBuffer){
+				return String.fromCharCode.apply(null, new Uint8Array(arrayBuffer));
 			}
 			
 			
 			var socket = io.connect();
 			
+			
+			tabs.delegate( "span.ui-icon-close", "click", function() {
+					var panelId = $( this ).closest( "li" ).remove().attr( "aria-controls" );
+					if (tabSockets[panelId] == null){
+						delete tabSockets[panelId];
+						delete tabInterval[panelId];
+						delete tabData[panelId];
+						$( "#" + panelId ).remove();
+						tabs.tabs( "refresh" );
+					} else {
+						var socketTag = tabSockets[panelId].substring(2);
+						stopWatchingDevice($('#device-watch-btn-' + socketTag)[0]);
+					}
+				});
 			
 			socket.on("test", function (msg, socketId) {
 				
@@ -299,6 +175,8 @@
 
 			socket.on("reconnect", function (oldSocketId, newSocketId) {
 				
+				populateDevices(true);
+				
 				var panelId;
 				for (var c in tabSockets) {
 					if (tabSockets[c] == oldSocketId){
@@ -310,7 +188,7 @@
 				var newSocketKey = newSocketId.substring(2);
 				//var deviceItemRow = $('#device-row-' + newSocketKey)[0];
 				//var editedItemRow = $( deviceItemRow.replace( /newSocketKey/g, newSocketKey));
-				var socketButton = $('#device-watch-btn-' + oldSocketKey)[0];
+				var socketButton = $('#device-watch-btn-' + newSocketKey)[0];
 				socketButton.onclick = function(){
 					stopWatchingDevice(socketButton);
 				}
@@ -323,7 +201,7 @@
 			socket.on("devices_changed", function (newDevices) {
 				
 				devices = newDevices;
-				populateDevices();
+				populateDevices(false);
 			});
 
 			
@@ -352,15 +230,36 @@
 								, options).draw();
 						}
 					}
-				
 					
-					while(tabData[activeTab]['dataBuff1'].length > 4){
-						for (var j = 1; j <= numberOfCharts; j++) {
+					for (var j = 1; j <= numberOfCharts; j++) {
 							tabData[activeTab]['data' + j].shift();
 							tabData[activeTab]['data' + j]
 								.push(tabData[activeTab]['dataBuff' + j].shift());
-						}
 					}
+				
+					if (tabData[activeTab]['dataBuff1'].length > 1000/updateInterval){
+						//while(tabData[activeTab]['dataBuff1'].length > 1000/updateInterval + 1){
+							for (var j = 1; j <= numberOfCharts; j++) {
+								tabData[activeTab]['data' + j].shift();
+								tabData[activeTab]['data' + j]
+									.push(tabData[activeTab]['dataBuff' + j].shift());
+							}
+						//}
+					} 
+					
+					if (tabData[activeTab]['dataBuff1'].length > 2000/updateInterval){
+						//while(tabData[activeTab]['dataBuff1'].length > 1000/updateInterval + 1){
+							for (var j = 1; j <= numberOfCharts; j++) {
+								tabData[activeTab]['data' + j].shift();
+								tabData[activeTab]['data' + j]
+									.push(tabData[activeTab]['dataBuff' + j].shift());
+							}
+						//}
+					} 
+					//else {
+						
+						
+					//}
 					
 					while(tabData[activeTab]['data1'].length > 250){
 						for (var j = 0; j < numberOfCharts; j++) {
@@ -384,14 +283,14 @@
 				
 				$("#table-devices").remove();
 				$("#container-devices").append( "<div id='table-devices' class= 'table'></div>" );
-				$("#table-devices").append( "<thead><tr><th>Device</th><th>Sensor</th><th>Vendor</th><th>Resolution</th><th>DB tag</th><th>DB status</th><th>Watching</th></tr></thead>" );
+				$("#table-devices").append( "<thead><tr><th>Device</th><th>Sensor</th><th>Vendor</th><th>Resolution</th><th>DB tag</th><th>DB status</th><th>Watching</th><th>View data</th></tr></thead>" );
 				
 				socket.emit("request_devices", function (serverDevices){
 						devices = serverDevices;
 						console.log("REGISTERED_DEVICES: ", serverDevices);
 						for(key in devices){
 							var device = JSON.parse(devices[key]);
-							var deviceItemTemplate = '<tbody><tr id=device-row-'+ key.substring(2) +'"><td>'+device.device+'</td><td>'+device.sensor+'</td><td>'+device.sensor_vendor+'</td><td>'+device.resolution+'</td><td><input type="text" class="form-control" id="text-tag-'+key.substring(2)+'"></td><td><button id=device-db-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="saveToDB(this)">Save to DB</button</td><td><button id=device-watch-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="watchDevice(this)">Watch</button</td></tr></tbody>';
+							var deviceItemTemplate = '<tbody><tr id=device-row-'+ key.substring(2) +'"><td>'+device.device+'</td><td>'+device.sensor+'</td><td>'+device.sensor_vendor+'</td><td>'+device.resolution+'</td><td><input type="text" class="form-control" id="text-tag-'+key.substring(2)+'"></td><td><button id=device-db-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="saveToDB(this)">Save to DB</button</td><td><button id=device-watch-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="watchDevice(this)">Watch</button</td><td><button id=device-view-data-btn-'+ key.substring(2) +' type="button" class="btn btn-default" data-toggle="modal" data-target="#tagModal" value="'+key+'" onclick="openAddDbTabModal(this)">View</button</td></tr></tbody>';
 
 							$("#table-devices").append(deviceItemTemplate);
 						}
@@ -512,6 +411,135 @@
 				}
 				button.innerHTML = "Save to DB";
 			}
+			
+			function openAddDbTabModal(button){
+			
+				var device = JSON.parse(devices[button.value]);
+				
+				console.log("DEVICE: ", device);
+				//emit zahtjev za mjerenja iz pg
+				socket.emit("request_db_tags", device.id, function (dbTags){
+						
+						$("#tagsSelector").find('option').remove();
+						for(key in dbTags){
+							var parsedTag = JSON.parse(dbTags[key]);
+							var formatedKey = dbTags[key].replace(/\"/g, "\'");
+							$("#tagsSelector").append("<option value='"+ dbTags[key] +"'>"+parsedTag.tag+"</option>");
+						}
+						
+						//dialog.dialog( "open" );
+					});
+			
+			}
+			
+			function queryTimeDB(){
+			
+				var device = $("#tagsSelector").val();
+				var deviceMeasurement = JSON.parse(device);
+				var time_end = Number(deviceMeasurement.time_start) + 1000 * 15 * 60;
+				var query = "select sensor_data from sensor_data_bucket where time > " + deviceMeasurement.time_start + " and time < " + time_end + " and device_id = '"+ deviceMeasurement.device_id +"' and tag = '" + deviceMeasurement.tag + "'";
+				//var query = "select sensor_data from sensor_data where time > 1465492919308 and time < 1465493037307 and device_id = 'f2d3f2b8-ce92-457c-b56e-23080e10d2b8' and sensor_name = 'Gyroscope sensor' and tag = 'TestingGyro'";
+				
+				socket.emit("db_query",query , function(rslt){
+				
+					addDbTab(rslt.rows, device);
+				
+				});
+			
+			}
+			
+			function addDbTab(data, measurement) {
+					var measurementParsed = JSON.parse(measurement);
+					var tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>";
+					var label = measurementParsed.tag,
+					id = "tabs-" + tabCounter,
+					li = $( tabTemplate.replace( /#\{href\}/g, "#" + id ).replace( /#\{label\}/g, label ) )
+					var tabContentHtml = tabContentTemplate;
+					var totalPoints = data.length;
+					var dataSplit =  ab2str(data[0][0]);
+					var dataFields = dataSplit.split(',').length;
+					var minY = 0;
+					var maxY = 0;
+					
+					tabContentHtml += "<div><p>Device : " + measurementParsed.device_name + " </p><p>Sensor : " + measurementParsed.sensor_name + " </p><p>Resolution : " + measurementParsed.resolution + " </p><p>Device : " + new Date(Number(measurementParsed.time_start)) + " </p></div>"
+					
+					for (var j = 1; j<=dataFields; j++){
+						tabContentHtml += "<div id='flot-placeholder" + j + "-" + id + "' style='width:800px;height:200px;margin:0 auto'></div>"
+					}
+					
+					tabData[id] = {};
+					for (var j = 1; j<=dataFields; j++){
+						var a = "data" + j;
+						tabData[id][a] = [];
+					}
+					
+					
+					tabs.find( ".ui-tabs-nav" ).append( li );
+					tabs.append( "<div id='" + id + "'><p>" + tabContentHtml + "</p></div>" );
+					
+					//init chart
+					var counter = 0;
+					for (var j = 0; j < data.length; j++) {
+						
+						var dataRow = ab2str(data[j][0]).split(',');
+						for (var i = 0; i < dataFields; i++) {
+						
+							if (Number(dataRow[i].trim()) > maxY)
+								maxY = Number(dataRow[i].trim());
+								
+							if (Number(dataRow[i].trim()) < minY)
+								minY = Number(dataRow[i].trim());
+						
+							var temp = [counter, dataRow[i].trim()];
+							tabData[id]['data' + (i+1)].push(temp);
+						}
+						counter++;
+					}			
+					
+					while (tabData[id]['data1'].length < 250) {
+						var temp = [counter, 0];
+						for (var j = 0; j < dataFields; j++) {
+							tabData[id]['data' + (j+1)].push(temp);
+						}
+						counter++;
+					}
+					
+					var options = {
+						series: {
+							shadowSize: 0,
+							lines: {
+								show: true,
+								lineWidth: 1.2,
+								fill: false
+							}
+						},
+						xaxis: {
+							show:false
+						},
+						yaxis: {
+							min: minY,
+							max: maxY,
+							tickSize: maxY / 3,
+						},
+						legend: {        
+							labelBoxBorderColor: "#fff"
+						},
+						grid: {                
+							backgroundColor: "#000000",
+							tickColor: "#008040"
+						}
+					};
+					
+					for (var j = 0; j < dataFields; j++) {
+						$.plot($("#flot-placeholder"+ (j + 1) +"-" + id)
+							, [{ data: tabData[id]['data' + (j + 1)], color: "#00FF00" }]
+							, options).draw();
+					}
+					
+					tabs.tabs( "refresh" );
+					tabCounter++;
+					
+				}
 		</script>  
 	</body>
 </html>								
