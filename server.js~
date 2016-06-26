@@ -125,7 +125,7 @@ ioMob.on('connection', function(socket){
 					delete mobileObservables[device];
 					mobileObservables[socket.id] = temp;
 					console.log('Mobile observables after remove: ' + Object.keys(mobileObservables).length);			
-					ioWeb.emit('devices_changed');
+					//ioWeb.emit('devices_changed');
 					mobileObservables[socket.id].notifyObservers("reconnect" ,device, socket.id);	
 					ack("old");
 

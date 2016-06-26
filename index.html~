@@ -175,7 +175,7 @@
 
 			socket.on("reconnect", function (oldSocketId, newSocketId) {
 				
-				//populateDevices(true);
+				populateDevices(true);
 				
 				var panelId;
 				for (var c in tabSockets) {
