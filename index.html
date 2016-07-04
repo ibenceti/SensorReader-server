@@ -89,7 +89,6 @@
 					</div>
 				</div>
 			</div>
-
 			<div class="row">
 				<div class="col-md-12">
 					<div id="dialog" title="Tag data">
@@ -117,11 +116,10 @@
 			var totalPoints = 250;
 			var updateInterval;
 			var tabCounter = 0;
-			//var tabTemplate = "<li><a href='#{href}'>#{label}</a></li>";
 			var tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>";
 			var tabContentTemplate = "";
-			//var tabContentTemplate = "<button type='button' onclick='button1(deviceSocketId)'>Dump data to DB</button><button type='button' onclick='button2(deviceSocketId)'>Dump data to text file</button><button type='button'  onclick='button3(deviceSocketId, 60)' >Save period to DB</button>";
 			var tabs = $( "#tabs" ).tabs();
+			
 			
 			function ab2str (arrayBuffer){
 				return String.fromCharCode.apply(null, new Uint8Array(arrayBuffer));
@@ -290,7 +288,7 @@
 						console.log("REGISTERED_DEVICES: ", serverDevices);
 						for(key in devices){
 							var device = JSON.parse(devices[key]);
-							var deviceItemTemplate = '<tbody><tr id=device-row-'+ key.substring(2) +'"><td>'+device.device+'</td><td>'+device.sensor+'</td><td>'+device.sensor_vendor+'</td><td>'+device.resolution+'</td><td><input type="text" class="form-control" id="text-tag-'+key.substring(2)+'"></td><td><button id=device-db-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="saveToDB(this)">Save to DB</button</td><td><button id=device-watch-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="watchDevice(this)">Watch</button</td><td><button id=device-view-data-btn-'+ key.substring(2) +' type="button" class="btn btn-default" data-toggle="modal" data-target="#tagModal" value="'+key+'" onclick="openAddDbTabModal(this)">View</button</td></tr></tbody>';
+							var deviceItemTemplate = '<tbody><tr id=device-row-'+ key.substring(2) +'"><td>'+device.device+'</td><td>'+device.sensor+'</td><td>'+device.sensor_vendor+'</td><td>'+device.resolution+'</td><td><input type="text" class="form-control" id="text-tag-'+key.substring(2)+'"></td><td><button id=device-db-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="saveToDB(this)">Save to DB</button></td><td><button id=device-watch-btn-'+ key.substring(2) +' type="button" class="btn btn-default" value="'+key+'" onclick="watchDevice(this)">Watch</button></td><td><button id=device-view-data-btn-'+ key.substring(2) +' type="button" class="btn btn-default" data-toggle="modal" data-target="#tagModal" value="'+key+'" onclick="openAddDbTabModal(this)">View</button></td></tr></tbody>';
 
 							$("#table-devices").append(deviceItemTemplate);
 						}
@@ -314,7 +312,7 @@
 					var device = deviceInfo.device;
 					var totalPoints = 250;
 					var updateInterval = deviceInfo.resolution;
-					var now = new Date().getTime();
+					var now = 0;
 					var options = {
 						series: {
 							shadowSize: 0,
@@ -325,7 +323,20 @@
 							}
 						},
 						xaxis: {
-							show:false
+							tickSize: 10 * updateInterval,
+							tickFormatter: function (v, axis) {
+								var date = new Date(v);
+								if ((v) % (updateInterval * 50) == 0) {
+								
+									var hours =  date.getHours() < 10 ? "0" + date.getHours() : date.getHours();
+									var minutes = date.getMinutes() < 10 ? "0" + date.getMinutes() : date.getMinutes();
+									var seconds = date.getSeconds() < 10 ? "0" + date.getSeconds() : date.getSeconds();
+									return hours + ":" + minutes + ":" + seconds;
+								} else {
+									return "";
+								}
+								now += updateInterval;
+							}
 						},
 						yaxis: {
 							min: -deviceInfo.sensor_maxrange,
@@ -448,6 +459,43 @@
 			
 			}
 			
+			function downloadCSV(button){
+			
+				
+				var tabId = button.id.substring(13);
+				var data = tabData[tabId];
+				var fileName = button.value.split(",")[0] + ".csv";
+				var fileText = "";
+				fileText += button.value;
+				
+				for (var prop in data){
+					if (data.hasOwnProperty(prop)){
+						for (var j = 0; j < data[prop].length; j++){
+							if (j == 0)
+								fileText +="\n" +  data[prop][j][1];
+							else
+								fileText += "," + data[prop][j][1];
+						}
+					}
+				}
+				
+				var file = new Blob([fileText], {type: "text/csv"});
+				
+				if (window.navigator.msSaveOrOpenBlob){
+					window.navigator.msSaveBlob(file, filename);
+				} else {
+					var a = window.document.createElement("a");
+					a.href = window.URL.createObjectURL(file);
+					a.download =  fileName;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+				}
+				
+				
+			}
+			
+			
 			function addDbTab(data, measurement) {
 					var measurementParsed = JSON.parse(measurement);
 					var tabTemplate = "<li><a href='#{href}'>#{label}</a> <span class='ui-icon ui-icon-close' role='presentation'>Remove Tab</span></li>";
@@ -460,12 +508,18 @@
 					var dataFields = dataSplit.split(',').length;
 					var minY = 0;
 					var maxY = 0;
+					var maxYAxis = 0;
+					var measurementString = measurementParsed.tag + "," + measurementParsed.device_name + "," + measurementParsed.sensor_name + "," + measurementParsed.resolution + "," + measurementParsed.time_start;
 					
-					tabContentHtml += "<div><p>Device : " + measurementParsed.device_name + " </p><p>Sensor : " + measurementParsed.sensor_name + " </p><p>Resolution : " + measurementParsed.resolution + " </p><p>Device : " + new Date(Number(measurementParsed.time_start)) + " </p></div>"
+					tabContentHtml += '<div><p>Device : ' + measurementParsed.device_name + ' </p><p>Sensor : ' + measurementParsed.sensor_name + ' </p><p>Resolution : ' + measurementParsed.resolution + ' </p><p>Device : ' + new Date(Number(measurementParsed.time_start)) + ' </p><button id=save-csv-btn-'+ id +' type="button" class="btn btn-default" value="' + measurementString + '" onClick="downloadCSV(this)">Download CSV</button></div>'
+					
+					
 					
 					for (var j = 1; j<=dataFields; j++){
 						tabContentHtml += "<div id='flot-placeholder" + j + "-" + id + "' style='width:800px;height:200px;margin:0 auto'></div>"
 					}
+					
+				
 					
 					tabData[id] = {};
 					for (var j = 1; j<=dataFields; j++){
@@ -494,7 +548,12 @@
 							tabData[id]['data' + (i+1)].push(temp);
 						}
 						counter++;
-					}			
+					}		
+					
+					if (maxY > (-minY))
+						maxYAxis =  maxY;
+					else
+						maxYAxis = -minY;	
 					
 					while (tabData[id]['data1'].length < 250) {
 						var temp = [counter, 0];
@@ -514,12 +573,22 @@
 							}
 						},
 						xaxis: {
-							show:false
+							tickSize: 10,
+							tickFormatter: function (v, axis) {
+								var date = new Date(v * Number(measurementParsed.resolution));
+								if ((v * Number(measurementParsed.resolution)) % (15 * 1000) == 0) {
+									var minutes = date.getMinutes() < 10 ? "0" + date.getMinutes() : date.getMinutes();
+									var seconds = date.getSeconds() < 10 ? "0" + date.getSeconds() : date.getSeconds();
+									return minutes + ":" + seconds;
+								} else {
+									return "";
+								}
+							}
 						},
 						yaxis: {
-							min: minY,
-							max: maxY,
-							tickSize: maxY / 3,
+							min: -maxYAxis,
+							max: maxYAxis,
+							tickSize: maxYAxis / 3,
 						},
 						legend: {        
 							labelBoxBorderColor: "#fff"
